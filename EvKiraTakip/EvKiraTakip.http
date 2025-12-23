@@ -1,0 +1,6 @@
+@EvKiraTakip_HostAddress = http://localhost:5030
+
+GET {{EvKiraTakip_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
