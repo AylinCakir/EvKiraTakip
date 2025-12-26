@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using EvKiraTakip;
+using EvKiraTakip.Common;
+using EvKiraTakip.DTOs;
 using EvKiraTakip.Models;
 
 var  builder = WebApplication.CreateBuilder(args);
@@ -23,32 +25,70 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 //Users
-app.MapGet("/users", async (AppDbContext db) => await db.Users.ToListAsync());
-app.MapGet("/users/{id}", async (int id, AppDbContext db) => await db.Users.FindAsync(id));
-app.MapPost("/users", async (User user, AppDbContext db) =>
+app.MapGet("/users", async (AppDbContext db) =>
 {
+    var users = await db.Users.Select(u => new UserResponseDto
+        {
+            Id = u.Id,
+            FullName = u.Name +  " " + u.Surname,
+            Email = u.Email,
+        })
+        .ToListAsync();
+    return Results.Ok(ApiResponse<List<UserResponseDto>>.Susscess(users));
+});
+app.MapGet("/users/{id}", async (int id, AppDbContext db) =>
+{
+    var user = await db.Users.FindAsync(id);
+    if (user == null) return Results.NotFound(ApiResponse<string>.Fail("User not found"));
+
+    var response = new UserResponseDto
+    {
+        Id = user.Id,
+        FullName = user.Name + " " + user.Surname,
+        Email = user.Email
+    };
+    return Results.Ok(ApiResponse<UserResponseDto>.Susscess(response));
+});
+app.MapPost("/users", async (UserCreateDto dto, AppDbContext db) =>
+{
+    var user = new User
+    {
+        Name = dto.Name,
+        Surname = dto.Surname,
+        Email = dto.Email,
+        Age = dto.Age,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+    };
     db.Users.Add(user);
     await db.SaveChangesAsync();
-    return Results.Created($"/users/{user.Id}", user);
-});
-app.MapPut("/user/{id}", async (int id, User inputUser, AppDbContext db) =>
-{
-    var user = db.Users.Find(id);
-    if (user == null) return Results.NotFound();
 
-    user.Name = inputUser.Name;
-    user.Surname = inputUser.Surname;
-    user.Email = inputUser.Email;
-    user.Age = inputUser.Age;
-    user.Address = inputUser.Address;
+    var response = new UserResponseDto
+    {
+        Id = user.Id,
+        FullName = user.Name + " " + user.Surname,
+        Email = user.Email
+    };
+    return Results.Created($"/users/{user.Id}", ApiResponse<UserResponseDto>.Susscess(response, "User created"));
+});
+app.MapPut("/user/{id}", async (int id, UserUpdateDto dto, AppDbContext db) =>
+{
+    var user =await db.Users.FindAsync(id);
+    if (user is null) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
+
+    user.Name = dto.Name;
+    user.Surname = dto.Surname;
+    user.Age = dto.Age;
+    user.Address = dto.Address;
+    user.CreatedAt = DateTime.UtcNow;
     
     await db.SaveChangesAsync();
-    return Results.NoContent();
+    return Results.Ok(ApiResponse<string>.Susscess(null, "User updated."));
 });
 app.MapDelete("/users/{id}", async (int id, AppDbContext db) =>
 {
     var user = await  db.Users.FindAsync(id);
-    if (user is null) return Results.NotFound();
+    if (user is null) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
     db.Users.Remove(user);
     await db.SaveChangesAsync();
     return Results.NoContent();
