@@ -13,6 +13,8 @@ public class RentPayment
     
     public int TenantId { get; set; }
     
+    public Tenant Tenant { get; set; } = null!;
+    
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     
