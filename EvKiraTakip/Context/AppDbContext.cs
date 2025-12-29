@@ -14,20 +14,23 @@ public class AppDbContext : DbContext
 
    protected override void OnModelCreating(ModelBuilder modelBuilder)
    {
-      base.OnModelCreating(modelBuilder);
+      
       modelBuilder.Entity<House>()
-         .HasOne<User>()
-         .WithMany()
-         .HasForeignKey(x => x.UserId);
+         .HasOne(h => h.User)
+         .WithMany(u => u.Houses)
+         .HasForeignKey(h => h.UserId)
+         .OnDelete(DeleteBehavior.Cascade);
 
       modelBuilder.Entity<Tenant>()
-         .HasOne<House>()
+         .HasOne(t => t.House)
          .WithMany()
          .HasForeignKey(t => t.HouseId);
       
       modelBuilder.Entity<RentPayment>()
-         .HasOne<Tenant>()
+         .HasOne(r => r.Tenant)
          .WithMany()
-         .HasForeignKey(t => t.TenantId);
+         .HasForeignKey(r => r.TenantId);
+      
+      base.OnModelCreating(modelBuilder);
    }
 }

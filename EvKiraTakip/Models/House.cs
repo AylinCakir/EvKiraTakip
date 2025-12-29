@@ -5,14 +5,16 @@ namespace EvKiraTakip.Models;
 public class House
 {
     [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
-    
     public int Id { get; set; }
-    
-    public string Title { get; set; }
-    public string Address  { get; set; }
-    
+
+    public string Title { get; set; } = null!;
+    public string Address { get; set; } = null!;
+
+    [ForeignKey(nameof(User))]
     public int UserId { get; set; }
-    
+
+    public User User { get; set; } = null!;
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     

@@ -57,6 +57,7 @@ app.MapPost("/users", async (UserCreateDto dto, AppDbContext db) =>
         Surname = dto.Surname,
         Email = dto.Email,
         Age = dto.Age,
+        Address = dto.Address,
         CreatedAt = DateTime.UtcNow,
         UpdatedAt = DateTime.UtcNow
     };
@@ -96,12 +97,51 @@ app.MapDelete("/users/{id}", async (int id, AppDbContext db) =>
 
 //House
 app.MapGet("/houses", async (AppDbContext db) => await db.Houses.ToListAsync());
-app.MapGet("/house/{id}", async (int id, AppDbContext db) => await db.Houses.FindAsync(id));
-app.MapPost("/houses", async (House house, AppDbContext db) =>
+app.MapGet("/house/{id}", async (int id, AppDbContext db) =>
 {
+    var house = await db.Houses.FirstOrDefaultAsync(h => h.Id == id);
+    
+    if(house is null)
+        return Results.NotFound("House not found.");
+    var dto = new HouseResponseDto()
+    {
+        Id = house.Id,
+        Title = house.Title,
+        Address = house.Address,
+        UserId = house.UserId
+    };
+    return Results.Ok(dto);
+});
+app.MapPost("/houses", async (HouseCreateDto dto, AppDbContext db) =>
+{
+    var userExists = await  db.Users.AnyAsync(u => u.Id == dto.UserId);
+    if (!userExists)
+    {
+        return Results.NotFound("House not found.");
+    }
+
+    var house = new House()
+    {
+        Title = dto.Title,
+        Address = dto.Address,
+        UserId = dto.UserId,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow
+    };
+    
     db.Houses.Add(house);
     await db.SaveChangesAsync();
+
+    var response = new HouseResponseDto()
+    {
+        Id = house.Id,
+        Title = house.Title,
+        Address = house.Address,
+        UserId = house.UserId
+    };
+    return Results.Created($"/houses/{house.Id}", response);
 });
+
 app.MapPut("/houses/{id}", async (int id, House inputHouse, AppDbContext db) =>
 {
     var house = db.Houses.Find(id);
@@ -179,5 +219,6 @@ app.MapDelete("/rentPayments/{id}", async (int id, AppDbContext db) =>
     return Results.NoContent();
 });
 
+Console.WriteLine(Directory.GetCurrentDirectory());
 app.Run();
 
