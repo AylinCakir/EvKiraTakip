@@ -23,12 +23,12 @@ public class AppDbContext : DbContext
 
       modelBuilder.Entity<Tenant>()
          .HasOne(t => t.House)
-         .WithMany()
+         .WithMany(h  => h.Tenants)
          .HasForeignKey(t => t.HouseId);
       
       modelBuilder.Entity<RentPayment>()
          .HasOne(r => r.Tenant)
-         .WithMany()
+         .WithMany(t => t.RentPayments )
          .HasForeignKey(r => r.TenantId);
       
       base.OnModelCreating(modelBuilder);

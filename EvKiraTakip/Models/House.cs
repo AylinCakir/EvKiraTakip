@@ -15,6 +15,8 @@ public class House
 
     public User User { get; set; } = null!;
 
+    public ICollection<Tenant> Tenants { get; set; } = new List<Tenant>();
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     
