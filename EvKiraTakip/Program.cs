@@ -3,11 +3,18 @@ using EvKiraTakip;
 using EvKiraTakip.Common;
 using EvKiraTakip.DTOs;
 using EvKiraTakip.Models;
+using EvKiraTakip.Services;
+using EvKiraTakip.Services.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IHouseService, HouseService>();
+builder.Services.AddScoped<ITenantService, TenantService>();
+builder.Services.AddScoped<IRentPaymentService, RentPaymentService>();
 
 builder.Services.AddOpenApi();
 
@@ -25,383 +32,123 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 //Users
-app.MapGet("/users", async (AppDbContext db) =>
+app.MapGet("/users", async (IUserService userService) =>
 {
-    var users = await db.Users
-        .Include(u => u.Houses)
-        .ThenInclude(h => h.Tenants)
-        .ThenInclude(t => t.RentPayments)
-        .Select(u => new UserResponseDto
-        {
-            Id = u.Id,
-            FullName = u.Name + " " + u.Surname,
-            Email = u.Email,
-            Houses = u.Houses.Select(h => new HouseResponseDto
-            {
-                Id = h.Id,
-                Title = h.Title,
-                Address = h.Address,
-                Tenants = h.Tenants.Select(t => new TenantResponseDto
-                {
-                    Id = t.Id,
-                    Name = t.Name,
-                    Phone = t.Phone,
-                    RentPayments = t.RentPayments.Select(r => new RentPaymentResponseDto
-                    {
-                        Id = r.Id,
-                        Amount = r.Amount,
-                        PaymentDate = r.PaymentDate
-                    }).ToList()
-                }).ToList()
-            }).ToList()
-        })
-        .ToListAsync();
-    return Results.Ok(ApiResponse<List<UserResponseDto>>.Susscess(users));
+    var user = await userService.GetAllUserAsync();
+    return Results.Ok(ApiResponse<List<UserResponseDto>>.Susscess(user));
 });
-app.MapGet("/users/{id}", async (int id, AppDbContext db) =>
+app.MapGet("/users/{id}", async (int id, IUserService userService) =>
 {
-    var user = await db.Users
-        .Include(u => u.Houses)
-        .ThenInclude(h=> h.Tenants)
-        .ThenInclude(r=>r.RentPayments)
-        .Where(t=> t.Id == id)
-        .FirstOrDefaultAsync(u => u.Id == id);
-    if (user == null) return Results.NotFound(ApiResponse<string>.Fail("User not found"));
-
-    var response = new UserResponseDto
-    {
-        Id = user.Id,
-        FullName = user.Name + " " + user.Surname,
-        Email = user.Email,
-        Houses = user.Houses.Select(h => new HouseResponseDto
-        {
-            Id = h.Id,
-            Title = h.Title,
-            Address = h.Address,
-            Tenants = h.Tenants.Select(t => new TenantResponseDto
-            {
-                Id = t.Id,
-                Name = t.Name,
-                Phone = t.Phone,
-                RentPayments = t.RentPayments.Select(r => new RentPaymentResponseDto
-                {
-                    Id = r.Id,
-                    Amount = r.Amount,
-                    PaymentDate = r.PaymentDate
-                }).ToList()
-            }).ToList()
-        }).ToList()
-    };
-    return Results.Ok(ApiResponse<UserResponseDto>.Susscess(response));
+    var user = await userService.GetUserByIdAsync(id);
+    if(user == null) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
+    return Results.Ok(ApiResponse<UserResponseDto>.Susscess(user));
 });
-app.MapPost("/users", async (UserCreateDto dto, AppDbContext db) =>
+app.MapPost("/users", async (UserCreateDto dto, IUserService userService) =>
 {
-    var user = new User
-    {
-        Name = dto.Name,
-        Surname = dto.Surname,
-        Email = dto.Email,
-        Age = dto.Age,
-        Address = dto.Address,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
-    db.Users.Add(user);
-    await db.SaveChangesAsync();
-
-    var response = new UserResponseDto
-    {
-        Id = user.Id,
-        FullName = user.Name + " " + user.Surname,
-        Email = user.Email
-    };
-    return Results.Created($"/users/{user.Id}", ApiResponse<UserResponseDto>.Susscess(response, "User created."));
+    var user = await userService.CreateUserAsync(dto);
+    return Results.Created($"/users/{user.Id}", ApiResponse<UserResponseDto>.Susscess(user, "User created."));
 });
-app.MapPut("/users/{id}", async (int id, UserUpdateDto dto, AppDbContext db) =>
+app.MapPut("/users/{id}", async (int id, UserUpdateDto dto, IUserService userService) =>
 {
-    var user = await db.Users.FindAsync(id);
-    if (user is null) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
-
-    user.Name = dto.Name;
-    user.Surname = dto.Surname;
-    user.Email = dto.Email;
-    user.Age = dto.Age;
-    user.Address = dto.Address;
-    user.UpdatedAt = DateTime.UtcNow;
-    
-    await db.SaveChangesAsync();
-    return Results.Ok(ApiResponse<string>.Susscess(null, "User updated."));
+    var user = await userService.UpdateAsync(id, dto);
+    if(!user) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "User updated successfully."));
 });
-app.MapDelete("/users/{id}", async (int id, AppDbContext db) =>
+app.MapDelete("/users/{id}", async (int id, IUserService userService) =>
 {
-    var user = await  db.Users.FindAsync(id);
-    if (user is null) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
-    db.Users.Remove(user);
-    await db.SaveChangesAsync();
-    return Results.Ok(ApiResponse<string>.Susscess(null,"Deleted successfully."));
+    var user = await userService.DeleteAsync(id);
+    if (!user) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
+    return Results.NoContent();
 });
 
 //House
-app.MapGet("/houses", async (AppDbContext db) =>
+app.MapGet("/houses", async (IHouseService houseService) =>
 {
-    var houses = await db.Houses
-        .Include(h => h.Tenants)
-        .ThenInclude(t => t.RentPayments)
-        .Select(h => new HouseResponseDto
-        {
-            Id = h.Id,
-            Title = h.Title,
-            Address = h.Address,
-            Tenants = h.Tenants.Select(t => new TenantResponseDto
-            {
-                Id = t.Id,
-                Name = t.Name,
-                Phone = t.Phone,
-                RentPayments = t.RentPayments.Select(r => new RentPaymentResponseDto
-                {
-                    Id = r.Id,
-                    Amount = r.Amount,
-                    PaymentDate = r.PaymentDate
-                }).ToList()
-            }).ToList()
-        }).ToListAsync();
-    
-    return Results.Ok(ApiResponse<List<HouseResponseDto>>.Susscess(houses));
+    var house = await houseService.GetAllHouseAsync();
+    return Results.Ok(ApiResponse<List<HouseResponseDto>>.Susscess(house));
 });
-app.MapGet("/houses/{id}", async (int id, AppDbContext db) =>
+app.MapGet("/houses/{id}", async (int id, IHouseService houseService) =>
 {
-    var houses = await db.Houses
-        .Include(h => h.Tenants)
-        .ThenInclude(t => t.RentPayments)
-        .Where(h=> h.Id == id)
-        .Select(h => new HouseResponseDto
-        {
-            Id = h.Id,
-            Title = h.Title,
-            Address = h.Address,
-            Tenants = h.Tenants.Select(t => new TenantResponseDto
-            {
-                Id = t.Id,
-                Name = t.Name,
-                Phone = t.Phone,
-                RentPayments = t.RentPayments.Select(r => new RentPaymentResponseDto
-                {
-                    Id = r.Id,
-                    Amount = r.Amount,
-                    PaymentDate = r.PaymentDate
-                }).ToList()
-            }).ToList()
-        }).FirstOrDefaultAsync();
-    
-    if(houses is null) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
-    
-    return Results.Ok(ApiResponse<HouseResponseDto>.Susscess(houses));
+    var house = await houseService.GetHouseByIdAsync(id);
+    if(house is null) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
+    return Results.Ok(ApiResponse<HouseResponseDto>.Susscess(house));
 });
-app.MapPost("/houses", async (HouseCreateDto dto, AppDbContext db) =>
+app.MapPost("/houses", async (HouseCreateDto dto, IHouseService houseService) =>
 {
-    var userExists = await  db.Users.AnyAsync(u => u.Id == dto.UserId);
-    if (!userExists)
-    {
-        return Results.NotFound(ApiResponse<string>.Fail("User not found."));
-    }
-
-    var house = new House()
-    {
-        Title = dto.Title,
-        Address = dto.Address,
-        UserId = dto.UserId,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
-    
-    db.Houses.Add(house);
-    await db.SaveChangesAsync();
-
-    var response = new HouseResponseDto()
-    {
-        Id = house.Id,
-        Title = house.Title,
-        Address = house.Address,
-        
-    };
-    return Results.Created($"/houses/{house.Id}", ApiResponse<HouseResponseDto>.Susscess(response,"House  created."));
+    var house = await houseService.CreateHouseAsync(dto);
+    return Results.Created($"/houses/{house.Id}", ApiResponse<HouseResponseDto>.Susscess(house, "House created."));
 });
-app.MapPut("/houses/{id}", async (int id, HouseUpdateDto dto, AppDbContext db) =>
+app.MapPut("/houses/{id}", async (int id, HouseUpdateDto dto, IHouseService houseService) =>
 {
-    var house = db.Houses.Find(id);
-    if (house == null) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
-
-    house.Title = dto.Title;
-    house.Address = dto.Address;
-    house.UpdatedAt = DateTime.UtcNow;
-    
-    await db.SaveChangesAsync();
-    
-    return Results.Ok(ApiResponse<string>.Susscess(null, "House updated."));
+    var house = await houseService.UpdateHouseAsync(id, dto);
+    if(!house) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "House updated successfully."));
 });
-app.MapDelete("/houses/{id}", async (int id, AppDbContext db) =>
+app.MapDelete("/houses/{id}", async (int id, IHouseService houseService) =>
 {
-    var house = await  db.Houses.FindAsync(id);
-    if (house is null) return Results.NotFound();
-    db.Houses.Remove(house);
-    await db.SaveChangesAsync();
-    return Results.Ok(ApiResponse<string>.Susscess(null,"Deleted successfully."));
+    var house = await houseService.DeleteHouseAsync(id);
+    if(!house) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
+    return Results.NoContent();
 });
 
 //Tenant
-app.MapGet("/tenants", async (AppDbContext db) =>
+app.MapGet("/tenants", async (ITenantService tenantService) =>
 {
-    var tenants = await db.Tenants
-        .Include(t => t.RentPayments)
-        .Select(t => new TenantResponseDto
-        {
-            Id = t.Id,
-            Name = t.Name,
-            Phone = t.Phone,
-            RentPayments = t.RentPayments.Select(r => new RentPaymentResponseDto
-            {
-                Id = r.Id,
-                Amount = r.Amount,
-                PaymentDate = r.PaymentDate
-            }).ToList()
-        }).ToListAsync();
-    return Results.Ok(ApiResponse<List<TenantResponseDto>>.Susscess(tenants));
+    var tenant = await tenantService.GetAllTenantAsync();
+    return Results.Ok(ApiResponse<List<TenantResponseDto>>.Susscess(tenant));
 });
-app.MapGet("/tenants/{id}", async (int id, AppDbContext db) =>
+app.MapGet("/tenants/{id}", async (int id,ITenantService tenantService) =>
 {
-    var tenants = await db.Tenants
-        .Include(t => t.RentPayments)
-        .Where(t=> t.Id == id)
-        .Select(t => new TenantResponseDto
-        {
-            Id = t.Id,
-            Name = t.Name,
-            Phone = t.Phone,
-            RentPayments = t.RentPayments.Select(r => new RentPaymentResponseDto
-            {
-                Id = r.Id,
-                Amount = r.Amount,
-                PaymentDate = r.PaymentDate
-            }).ToList()
-        }).FirstOrDefaultAsync();
-    if(tenants is null) return Results.NotFound(ApiResponse<string>.Fail("Tenant not found."));
-    
-    return Results.Ok(ApiResponse<TenantResponseDto>.Susscess(tenants));
+    var tenant = await tenantService.GetTenantByIdAsync(id);
+    if(tenant is null) return Results.NotFound(ApiResponse<string>.Fail("Tenant not found."));
+    return Results.Ok(ApiResponse<TenantResponseDto>.Susscess(tenant));
 });
-app.MapPost("/tenants", async (TenantCreateDto dto, AppDbContext db) =>
+app.MapPost("/tenants", async (TenantCreateDto dto, ITenantService tenantService) =>
 {
-    var houseExists = await db.Houses.AnyAsync(h => h.Id == dto.HouseId);
-    if (!houseExists)
-        return Results.NotFound("House not found.");
-    var tenant = new Tenant()
-    {
-        Name = dto.Name,
-        Phone = dto.Phone,
-        HouseId = dto.HouseId,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
-
-    db.Tenants.Add(tenant);
-    await db.SaveChangesAsync();
-
-    var response = new TenantResponseDto
-    {
-        Id = tenant.Id,
-        Name = tenant.Name,
-        Phone = tenant.Phone
-    };
-    return Results.Created($"/tenants/{tenant.Id}", ApiResponse<TenantResponseDto>.Susscess(response,"Tenant created."));
+    var tenant = await tenantService.CreateTenantAsync(dto);
+    return Results.Created($"/tenants/{tenant.Id}", ApiResponse<TenantResponseDto>.Susscess(tenant,"Tenant created."));
 });
-app.MapPut("/tenants/{id}", async (int id, TenantUpdateDto dto, AppDbContext db) =>
+app.MapPut("/tenants/{id}", async (int id, TenantUpdateDto dto, ITenantService tenantService) =>
 {
-    var tenant = db.Tenants.Find(id);
-    if (tenant == null) return Results.NotFound();
-
-    tenant.Name = dto.Name;
-    tenant.Phone = dto.Phone;
-    tenant.UpdatedAt = DateTime.UtcNow;
-
-    await db.SaveChangesAsync();
-    return Results.Ok(ApiResponse<string>.Susscess(null, "Tenant updated."));
+    var tenant = await tenantService.UpdateTenantAsync(id, dto);
+    if(!tenant) return Results.NotFound(ApiResponse<string>.Fail("Tenant not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "Tenant updated successfully."));
 });
-app.MapDelete("/tenants/{id}", async (int id, AppDbContext db) =>
+app.MapDelete("/tenants/{id}", async (int id, ITenantService tenantService) =>
 {
-    var tenant = await db.Tenants.FindAsync(id);
-    if (tenant is null) return Results.NotFound();
-    db.Tenants.Remove(tenant);
-    await db.SaveChangesAsync();
-    return Results.Ok(ApiResponse<string>.Susscess(null,"Deleted successfully."));
+    var tenant = await tenantService.DeleteTenantAsync(id);
+    if (!tenant) return Results.NotFound(ApiResponse<string>.Fail("Tenant not found."));
+    return Results.NoContent();
 });
 
 //RentPayment
-app.MapGet("/rentPayments", async (AppDbContext db) =>
+app.MapGet("/rentPayments", async (IRentPaymentService rentPaymentService) =>
 {
-    var payment = await db.RentPayments.Select(r => new RentPaymentResponseDto
-    {
-        Id = r.Id,
-        Amount = r.Amount,
-        PaymentDate = r.PaymentDate
-    }).ToListAsync();
+    var payment = await rentPaymentService.GetAllPaymentAsync();
     return Results.Ok(ApiResponse<List<RentPaymentResponseDto>>.Susscess(payment));
 });
-app.MapGet("/rentPayments/{id}", async (int id, AppDbContext db) =>
+app.MapGet("/rentPayments/{id}", async (int id, IRentPaymentService rentPaymentService) =>
 {
-    var payments = await db.RentPayments
-        .Where(r=>r.Id == id)
-        .Select(r => new RentPaymentResponseDto
-    {
-        Id = r.Id,
-        Amount = r.Amount,
-        PaymentDate = r.PaymentDate
-    }).FirstOrDefaultAsync();
-    if (payments is null ) return  Results.NotFound(ApiResponse<string>.Fail("Payment not found."));
-    return Results.Ok(ApiResponse<RentPaymentResponseDto>.Susscess(payments));
+    var payment = await rentPaymentService.GetPaymentByIdAsync(id);
+    if(payment is null) return Results.NotFound(ApiResponse<string>.Fail("Payment not found."));
+    return Results.Ok(ApiResponse<RentPaymentResponseDto>.Susscess(payment));
 });
-app.MapPost("/rentPayments", async (RentPaymentCreateDto dto, AppDbContext db) =>
+app.MapPost("/rentPayments", async (RentPaymentCreateDto dto, IRentPaymentService rentPaymentService) =>
 {
-    var tenantExists = await db.Tenants.AnyAsync(t => t.Id == dto.TenantId);
-    if (!tenantExists)
-        return Results.NotFound("Tenant not found.");
-    var payment = new RentPayment
-    {
-        Amount = dto.Amount,
-        TenantId = dto.TenantId,
-        PaymentDate = DateTime.UtcNow,
-        CreatedAt =  DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
-    
-    db.RentPayments.Add(payment);
-    await db.SaveChangesAsync();
-
-    var response = new RentPaymentResponseDto
-    {
-        Id = payment.Id,
-        Amount = payment.Amount,
-        PaymentDate = payment.PaymentDate,
-    };
-    return Results.Created($"/rentPayments/{payment.Id}", ApiResponse<RentPaymentResponseDto>.Susscess(response,"Rent Payment created."));
+    var payment = await rentPaymentService.CreatePaymentAsync(dto);
+    return Results.Created($"/rentPayments/{payment.Id}", ApiResponse<RentPaymentResponseDto>.Susscess(payment,"Rent Payment created."));
 });
-app.MapPut("/rentPayments/{id}", async (int id, RentPaymentsUpdateDto dto, AppDbContext db) =>
+app.MapPut("/rentPayments/{id}", async (int id, RentPaymentsUpdateDto dto, IRentPaymentService rentPaymentService) =>
 {
-    var rentPayment = db.RentPayments.Find(id);
-    if (rentPayment == null) return Results.NotFound();
-
-    rentPayment.Amount = dto.Amount;
-    rentPayment.PaymentDate = dto.PaymentDate;
-    rentPayment.UpdatedAt = DateTime.UtcNow;
-
-    await db.SaveChangesAsync();
-    return Results.Ok(ApiResponse<string>.Susscess(null, "Rent payment updated."));
+    var payment = await rentPaymentService.UpdatePaymentAsync(id, dto);
+    if(!payment) return Results.NotFound(ApiResponse<string>.Fail("Rent payment not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "Rent payment updated successfully."));
 });
-app.MapDelete("/rentPayments/{id}", async (int id, AppDbContext db) =>
+app.MapDelete("/rentPayments/{id}", async (int id, IRentPaymentService rentPaymentService) =>
 {
-    var rentPayment = db.RentPayments.Find(id);
-    if (rentPayment is null) return Results.NotFound();
-    db.RentPayments.Remove(rentPayment);
-    await db.SaveChangesAsync();
-    return Results.Ok(ApiResponse<string>.Susscess(null,"Deleted successfully."));
+    var payment = await rentPaymentService.DeletePaymentAsync(id);
+    if(!payment) return Results.NotFound(ApiResponse<string>.Fail("Rent payment not found."));
+    return Results.NoContent();
 });
 
 app.Run();
