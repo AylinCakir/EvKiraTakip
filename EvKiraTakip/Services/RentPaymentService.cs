@@ -36,8 +36,14 @@ public class RentPaymentService : IRentPaymentService
             }).FirstOrDefaultAsync();
     }
 
-    public async Task<RentPaymentResponseDto> CreatePaymentAsync(RentPaymentCreateDto dto)
+    public async Task<RentPaymentResponseDto?> CreatePaymentAsync(RentPaymentCreateDto dto)
     {
+        var exists = await _dbContext.RentPayments
+            .AnyAsync(r => r.TenantId == dto.TenantId 
+                           && r.PaymentDate.Month == DateTime.UtcNow.Month 
+                           && r.PaymentDate.Year == DateTime.UtcNow.Year);
+        if(exists) return  null;
+        
         var payment = new RentPayment()
         {
             Amount = dto.Amount,

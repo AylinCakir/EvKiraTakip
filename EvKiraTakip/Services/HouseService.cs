@@ -1,4 +1,5 @@
 using EvKiraTakip.DTOs;
+using EvKiraTakip.Enums;
 using EvKiraTakip.Models;
 using EvKiraTakip.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -64,8 +65,11 @@ public class HouseService : IHouseService
             }).FirstOrDefaultAsync();
     }
 
-    public async Task<HouseResponseDto> CreateHouseAsync(HouseCreateDto dto)
+    public async Task<HouseResponseDto?> CreateHouseAsync(HouseCreateDto dto)
     {
+        var exists = await  _dbContext.Houses.AnyAsync(h => h.UserId == dto.UserId && h.Title == dto.Title);
+        if (exists) return null;
+        
         var house = new House()
         {
             Title = dto.Title,
@@ -98,13 +102,16 @@ public class HouseService : IHouseService
         return true;
     }
 
-    public async Task<bool> DeleteHouseAsync(int id)
+    public async Task<DeleteHouseResult> DeleteHouseAsync(int id)
     {
         var house = await _dbContext.Houses.FindAsync(id);
-        if (house == null) return false;
+        if (house == null) return DeleteHouseResult.NotFound;
+
+        var hasTenant = await _dbContext.Tenants.AnyAsync(t => t.HouseId == id);
+        if (hasTenant) return DeleteHouseResult.HasTenants;
 
         _dbContext.Houses.Remove(house);
         await _dbContext.SaveChangesAsync();
-        return true;
+        return DeleteHouseResult.Deleted;
     }
 }
