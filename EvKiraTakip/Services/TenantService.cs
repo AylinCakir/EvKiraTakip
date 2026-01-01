@@ -93,7 +93,9 @@ public class TenantService : ITenantService
         var tenant = await _dbContext.Tenants.FindAsync(id);
         if (tenant == null) return false;
         
-        _dbContext.Tenants.Remove(tenant);
+        tenant.IsDeleted = true;
+        tenant.UpdatedAt = DateTime.UtcNow;
+        
         await _dbContext.SaveChangesAsync();
         return true;
     }
