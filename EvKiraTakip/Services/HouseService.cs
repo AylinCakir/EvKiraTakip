@@ -110,7 +110,9 @@ public class HouseService : IHouseService
         var hasTenant = await _dbContext.Tenants.AnyAsync(t => t.HouseId == id);
         if (hasTenant) return DeleteHouseResult.HasTenants;
 
-        _dbContext.Houses.Remove(house);
+        house.IsDeleted =  true;
+        house.UpdatedAt = DateTime.UtcNow;
+        
         await _dbContext.SaveChangesAsync();
         return DeleteHouseResult.Deleted;
     }

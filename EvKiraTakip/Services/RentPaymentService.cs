@@ -81,7 +81,9 @@ public class RentPaymentService : IRentPaymentService
         var payment = await _dbContext.RentPayments.FindAsync(id);
         if (payment == null) return false;
         
-        _dbContext.RentPayments.Remove(payment);
+        payment.IsDeleted =  true;
+        payment.UpdatedAt = DateTime.UtcNow;
+        
         await _dbContext.SaveChangesAsync();
         return true;
     }

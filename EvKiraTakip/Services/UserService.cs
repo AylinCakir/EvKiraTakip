@@ -115,7 +115,9 @@ public class UserService : IUserService
         var user = await _dbContext.Users.FindAsync(id);
         if (user == null) return false;
 
-        _dbContext.Users.Remove(user);
+        user.IsDeleted = true;
+        user.UpdatedAt = DateTime.UtcNow;
+        
         await _dbContext.SaveChangesAsync();
         return true;
     }
