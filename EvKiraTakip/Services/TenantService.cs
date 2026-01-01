@@ -50,8 +50,11 @@ public class TenantService : ITenantService
             }).FirstOrDefaultAsync();
     }
 
-    public async Task<TenantResponseDto> CreateTenantAsync(TenantCreateDto dto)
+    public async Task<TenantResponseDto?> CreateTenantAsync(TenantCreateDto dto)
     {
+        var exists = await  _dbContext.Tenants.AnyAsync(t => t.HouseId == dto.HouseId && t.Name == dto.Name);
+        if(exists) return null;
+        
         var tenant = new Tenant()
         {
             Name = dto.Name,

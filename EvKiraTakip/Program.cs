@@ -2,11 +2,22 @@ using Microsoft.EntityFrameworkCore;
 using EvKiraTakip;
 using EvKiraTakip.Common;
 using EvKiraTakip.DTOs;
-using EvKiraTakip.Models;
+using EvKiraTakip.Enums;
 using EvKiraTakip.Services;
 using EvKiraTakip.Services.Interfaces;
+using Microsoft.AspNetCore.Diagnostics;
+using Serilog;
+using Serilog.Core;
+
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console()
+    .WriteTo.File("Logs/logs.txt", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -21,6 +32,8 @@ builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+Log.Information("Application Starting...");
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -28,6 +41,25 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+
+        var exceptionHandlerPathFeature = context.Features.Get<IExceptionHandlerPathFeature>();
+
+        var exception =  exceptionHandlerPathFeature?.Error;
+        Log.Error(exception, "Unhandled exception occured.");
+        
+        var response =
+            ApiResponse<string>.Fail(exceptionHandlerPathFeature?.Error.Message ?? "Unexcepted error occured.");
+
+        await context.Response.WriteAsJsonAsync(response);
+    });
+});
 
 app.UseHttpsRedirection();
 
@@ -46,6 +78,7 @@ app.MapGet("/users/{id}", async (int id, IUserService userService) =>
 app.MapPost("/users", async (UserCreateDto dto, IUserService userService) =>
 {
     var user = await userService.CreateUserAsync(dto);
+    if (user == null) return Results.Conflict(ApiResponse<string>.Fail("Email already exists."));
     return Results.Created($"/users/{user.Id}", ApiResponse<UserResponseDto>.Susscess(user, "User created."));
 });
 app.MapPut("/users/{id}", async (int id, UserUpdateDto dto, IUserService userService) =>
@@ -76,6 +109,7 @@ app.MapGet("/houses/{id}", async (int id, IHouseService houseService) =>
 app.MapPost("/houses", async (HouseCreateDto dto, IHouseService houseService) =>
 {
     var house = await houseService.CreateHouseAsync(dto);
+    if (house == null) return Results.Conflict(ApiResponse<string>.Fail("House with same title already exists for this user."));
     return Results.Created($"/houses/{house.Id}", ApiResponse<HouseResponseDto>.Susscess(house, "House created."));
 });
 app.MapPut("/houses/{id}", async (int id, HouseUpdateDto dto, IHouseService houseService) =>
@@ -87,10 +121,17 @@ app.MapPut("/houses/{id}", async (int id, HouseUpdateDto dto, IHouseService hous
 app.MapDelete("/houses/{id}", async (int id, IHouseService houseService) =>
 {
     var house = await houseService.DeleteHouseAsync(id);
-    if(!house) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
-    return Results.NoContent();
+    return house switch
+    {
+        DeleteHouseResult.NotFound => Results.NotFound(ApiResponse<string>.Fail("House not found.")),
+        
+        DeleteHouseResult.HasTenants => Results.Conflict(ApiResponse<string>.Fail("House has tenants, cannot deleted.")),
+        
+        DeleteHouseResult.Deleted => Results.NoContent(),
+        
+        _ => Results.StatusCode(500)
+    };
 });
-
 //Tenant
 app.MapGet("/tenants", async (ITenantService tenantService) =>
 {
@@ -106,6 +147,7 @@ app.MapGet("/tenants/{id}", async (int id,ITenantService tenantService) =>
 app.MapPost("/tenants", async (TenantCreateDto dto, ITenantService tenantService) =>
 {
     var tenant = await tenantService.CreateTenantAsync(dto);
+    if(tenant == null) return  Results.Conflict(ApiResponse<string>.Fail("Tenant already exists in this house."));
     return Results.Created($"/tenants/{tenant.Id}", ApiResponse<TenantResponseDto>.Susscess(tenant,"Tenant created."));
 });
 app.MapPut("/tenants/{id}", async (int id, TenantUpdateDto dto, ITenantService tenantService) =>
@@ -136,6 +178,7 @@ app.MapGet("/rentPayments/{id}", async (int id, IRentPaymentService rentPaymentS
 app.MapPost("/rentPayments", async (RentPaymentCreateDto dto, IRentPaymentService rentPaymentService) =>
 {
     var payment = await rentPaymentService.CreatePaymentAsync(dto);
+    if(payment == null) return Results.Conflict(ApiResponse<string>.Fail("Rent already paid for this month."));
     return Results.Created($"/rentPayments/{payment.Id}", ApiResponse<RentPaymentResponseDto>.Susscess(payment,"Rent Payment created."));
 });
 app.MapPut("/rentPayments/{id}", async (int id, RentPaymentsUpdateDto dto, IRentPaymentService rentPaymentService) =>
@@ -149,6 +192,11 @@ app.MapDelete("/rentPayments/{id}", async (int id, IRentPaymentService rentPayme
     var payment = await rentPaymentService.DeletePaymentAsync(id);
     if(!payment) return Results.NotFound(ApiResponse<string>.Fail("Rent payment not found."));
     return Results.NoContent();
+});
+
+app.Lifetime.ApplicationStopped.Register(() =>
+{
+    Log.Information("Application stopped.");
 });
 
 app.Run();

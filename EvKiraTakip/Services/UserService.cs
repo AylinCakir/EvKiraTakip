@@ -67,8 +67,11 @@ public class UserService : IUserService
         };
     }
 
-    public async Task<UserResponseDto> CreateUserAsync(UserCreateDto dto)
+    public async Task<UserResponseDto?> CreateUserAsync(UserCreateDto dto)
     {
+        var emailExists = await _dbContext.Users.AnyAsync(u => u.Email == dto.Email);
+        if (emailExists) return null;
+        
         var user = new User
         {
             Name = dto.Name,
