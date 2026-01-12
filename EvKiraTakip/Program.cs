@@ -1,15 +1,38 @@
 using Microsoft.EntityFrameworkCore;
 using EvKiraTakip;
-using EvKiraTakip.Models;
+using EvKiraTakip.Common;
+using EvKiraTakip.DTOs;
+using EvKiraTakip.Enums;
+using EvKiraTakip.Services;
+using EvKiraTakip.Services.Interfaces;
+using Microsoft.AspNetCore.Diagnostics;
+using Serilog;
+using Serilog.Core;
 
-var  builder = WebApplication.CreateBuilder(args);
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console()
+    .WriteTo.File("Logs/logs.txt", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
 
-builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog();
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IHouseService, HouseService>();
+builder.Services.AddScoped<ITenantService, TenantService>();
+builder.Services.AddScoped<IRentPaymentService, RentPaymentService>();
 
 builder.Services.AddOpenApi();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+Log.Information("Application Starting...");
 
 var app = builder.Build();
 
@@ -19,124 +42,161 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+
+        var exceptionHandlerPathFeature = context.Features.Get<IExceptionHandlerPathFeature>();
+
+        var exception =  exceptionHandlerPathFeature?.Error;
+        Log.Error(exception, "Unhandled exception occured.");
+        
+        var response =
+            ApiResponse<string>.Fail(exceptionHandlerPathFeature?.Error.Message ?? "Unexcepted error occured.");
+
+        await context.Response.WriteAsJsonAsync(response);
+    });
+});
+
 app.UseHttpsRedirection();
 
 //Users
-app.MapGet("/users", async (AppDbContext db) => await db.Users.ToListAsync());
-app.MapGet("/users/{id}", async (int id, AppDbContext db) => await db.Users.FindAsync(id));
-app.MapPost("/users", async (User user, AppDbContext db) =>
+app.MapGet("/users", async (IUserService userService) =>
 {
-    db.Users.Add(user);
-    await db.SaveChangesAsync();
-    return Results.Created($"/users/{user.Id}", user);
+    var user = await userService.GetAllUserAsync();
+    return Results.Ok(ApiResponse<List<UserResponseDto>>.Susscess(user));
 });
-app.MapPut("/user/{id}", async (int id, User inputUser, AppDbContext db) =>
+app.MapGet("/users/{id}", async (int id, IUserService userService) =>
 {
-    var user = db.Users.Find(id);
-    if (user == null) return Results.NotFound();
-
-    user.Name = inputUser.Name;
-    user.Surname = inputUser.Surname;
-    user.Email = inputUser.Email;
-    user.Age = inputUser.Age;
-    user.Address = inputUser.Address;
-    
-    await db.SaveChangesAsync();
-    return Results.NoContent();
+    var user = await userService.GetUserByIdAsync(id);
+    if(user == null) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
+    return Results.Ok(ApiResponse<UserResponseDto>.Susscess(user));
 });
-app.MapDelete("/users/{id}", async (int id, AppDbContext db) =>
+app.MapPost("/users", async (UserCreateDto dto, IUserService userService) =>
 {
-    var user = await  db.Users.FindAsync(id);
-    if (user is null) return Results.NotFound();
-    db.Users.Remove(user);
-    await db.SaveChangesAsync();
+    var user = await userService.CreateUserAsync(dto);
+    if (user == null) return Results.Conflict(ApiResponse<string>.Fail("Email already exists."));
+    return Results.Created($"/users/{user.Id}", ApiResponse<UserResponseDto>.Susscess(user, "User created."));
+});
+app.MapPut("/users/{id}", async (int id, UserUpdateDto dto, IUserService userService) =>
+{
+    var user = await userService.UpdateAsync(id, dto);
+    if(!user) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "User updated successfully."));
+});
+app.MapDelete("/users/{id}", async (int id, IUserService userService) =>
+{
+    var user = await userService.DeleteAsync(id);
+    if (!user) return Results.NotFound(ApiResponse<string>.Fail("User not found."));
     return Results.NoContent();
 });
 
 //House
-app.MapGet("/houses", async (AppDbContext db) => await db.Houses.ToListAsync());
-app.MapGet("/house/{id}", async (int id, AppDbContext db) => await db.Houses.FindAsync(id));
-app.MapPost("/houses", async (House house, AppDbContext db) =>
+app.MapGet("/houses", async (IHouseService houseService) =>
 {
-    db.Houses.Add(house);
-    await db.SaveChangesAsync();
+    var house = await houseService.GetAllHouseAsync();
+    return Results.Ok(ApiResponse<List<HouseResponseDto>>.Susscess(house));
 });
-app.MapPut("/houses/{id}", async (int id, House inputHouse, AppDbContext db) =>
+app.MapGet("/houses/{id}", async (int id, IHouseService houseService) =>
 {
-    var house = db.Houses.Find(id);
-    if (house == null) return Results.NotFound();
-
-    house.Title = inputHouse.Title;
-    house.Address = inputHouse.Address;
-    
-    await db.SaveChangesAsync();
-    
-    return Results.NoContent();
+    var house = await houseService.GetHouseByIdAsync(id);
+    if(house is null) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
+    return Results.Ok(ApiResponse<HouseResponseDto>.Susscess(house));
 });
-app.MapDelete("/houses/{id}", async (int id, AppDbContext db) =>
+app.MapPost("/houses", async (HouseCreateDto dto, IHouseService houseService) =>
 {
-    var house = await  db.Houses.FindAsync(id);
-    if (house is null) return Results.NotFound();
-    db.Houses.Remove(house);
-    await db.SaveChangesAsync();
-    return Results.NoContent();
+    var house = await houseService.CreateHouseAsync(dto);
+    if (house == null) return Results.Conflict(ApiResponse<string>.Fail("House with same title already exists for this user."));
+    return Results.Created($"/houses/{house.Id}", ApiResponse<HouseResponseDto>.Susscess(house, "House created."));
 });
-
+app.MapPut("/houses/{id}", async (int id, HouseUpdateDto dto, IHouseService houseService) =>
+{
+    var house = await houseService.UpdateHouseAsync(id, dto);
+    if(!house) return Results.NotFound(ApiResponse<string>.Fail("House not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "House updated successfully."));
+});
+app.MapDelete("/houses/{id}", async (int id, IHouseService houseService) =>
+{
+    var house = await houseService.DeleteHouseAsync(id);
+    return house switch
+    {
+        DeleteHouseResult.NotFound => Results.NotFound(ApiResponse<string>.Fail("House not found.")),
+        
+        DeleteHouseResult.HasTenants => Results.Conflict(ApiResponse<string>.Fail("House has tenants, cannot deleted.")),
+        
+        DeleteHouseResult.Deleted => Results.NoContent(),
+        
+        _ => Results.StatusCode(500)
+    };
+});
 //Tenant
-app.MapGet("/tenants", async (AppDbContext db) => await db.Tenants.ToListAsync());
-app.MapGet("/tenants/{id}", async (int id, AppDbContext db) => await db.Tenants.FindAsync(id));
-app.MapPost("/tenants", async (Tenant tenant, AppDbContext db) =>
+app.MapGet("/tenants", async (ITenantService tenantService) =>
 {
-    db.Tenants.Add(tenant);
-    await db.SaveChangesAsync();
+    var tenant = await tenantService.GetAllTenantAsync();
+    return Results.Ok(ApiResponse<List<TenantResponseDto>>.Susscess(tenant));
 });
-app.MapPut("/tenants/{id}", async (int id, Tenant inputTenant, AppDbContext db) =>
+app.MapGet("/tenants/{id}", async (int id,ITenantService tenantService) =>
 {
-    var tenant = db.Tenants.Find(id);
-    if (tenant == null) return Results.NotFound();
-
-    tenant.Name = inputTenant.Name;
-    tenant.Phone = inputTenant.Phone;
-
-    await db.SaveChangesAsync();
-    return Results.NoContent();
+    var tenant = await tenantService.GetTenantByIdAsync(id);
+    if(tenant is null) return Results.NotFound(ApiResponse<string>.Fail("Tenant not found."));
+    return Results.Ok(ApiResponse<TenantResponseDto>.Susscess(tenant));
 });
-app.MapDelete("/tenants/{id}", async (int id, AppDbContext db) =>
+app.MapPost("/tenants", async (TenantCreateDto dto, ITenantService tenantService) =>
 {
-    var tenant = await db.Tenants.FindAsync(id);
-    if (tenant is null) return Results.NotFound();
-    db.Tenants.Remove(tenant);
-    await db.SaveChangesAsync();
+    var tenant = await tenantService.CreateTenantAsync(dto);
+    if(tenant == null) return  Results.Conflict(ApiResponse<string>.Fail("Tenant already exists in this house."));
+    return Results.Created($"/tenants/{tenant.Id}", ApiResponse<TenantResponseDto>.Susscess(tenant,"Tenant created."));
+});
+app.MapPut("/tenants/{id}", async (int id, TenantUpdateDto dto, ITenantService tenantService) =>
+{
+    var tenant = await tenantService.UpdateTenantAsync(id, dto);
+    if(!tenant) return Results.NotFound(ApiResponse<string>.Fail("Tenant not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "Tenant updated successfully."));
+});
+app.MapDelete("/tenants/{id}", async (int id, ITenantService tenantService) =>
+{
+    var tenant = await tenantService.DeleteTenantAsync(id);
+    if (!tenant) return Results.NotFound(ApiResponse<string>.Fail("Tenant not found."));
     return Results.NoContent();
 });
 
 //RentPayment
-app.MapGet("/rentPayments", async (AppDbContext db) => await db.RentPayments.ToListAsync());
-app.MapGet("/rentPayments/{id}", async (int id, AppDbContext db) => await db.RentPayments.FindAsync(id));
-app.MapPost("/rentPayments", async (RentPayment rentPayment, AppDbContext db) =>
+app.MapGet("/rentPayments", async (IRentPaymentService rentPaymentService) =>
 {
-    db.RentPayments.Add(rentPayment);
-    await db.SaveChangesAsync();
+    var payment = await rentPaymentService.GetAllPaymentAsync();
+    return Results.Ok(ApiResponse<List<RentPaymentResponseDto>>.Susscess(payment));
 });
-app.MapPut("/rentPayments/{id}", async (int id, RentPayment inputRentPayment, AppDbContext db) =>
+app.MapGet("/rentPayments/{id}", async (int id, IRentPaymentService rentPaymentService) =>
 {
-    var rentPayment = db.RentPayments.Find(id);
-    if (rentPayment == null) return Results.NotFound();
-
-    rentPayment.Amount = inputRentPayment.Amount;
-    rentPayment.PaymentDate = inputRentPayment.PaymentDate;
-
-    await db.SaveChangesAsync();
+    var payment = await rentPaymentService.GetPaymentByIdAsync(id);
+    if(payment is null) return Results.NotFound(ApiResponse<string>.Fail("Payment not found."));
+    return Results.Ok(ApiResponse<RentPaymentResponseDto>.Susscess(payment));
+});
+app.MapPost("/rentPayments", async (RentPaymentCreateDto dto, IRentPaymentService rentPaymentService) =>
+{
+    var payment = await rentPaymentService.CreatePaymentAsync(dto);
+    if(payment == null) return Results.Conflict(ApiResponse<string>.Fail("Rent already paid for this month."));
+    return Results.Created($"/rentPayments/{payment.Id}", ApiResponse<RentPaymentResponseDto>.Susscess(payment,"Rent Payment created."));
+});
+app.MapPut("/rentPayments/{id}", async (int id, RentPaymentsUpdateDto dto, IRentPaymentService rentPaymentService) =>
+{
+    var payment = await rentPaymentService.UpdatePaymentAsync(id, dto);
+    if(!payment) return Results.NotFound(ApiResponse<string>.Fail("Rent payment not found."));
+    return Results.Ok(ApiResponse<string>.Susscess(null, "Rent payment updated successfully."));
+});
+app.MapDelete("/rentPayments/{id}", async (int id, IRentPaymentService rentPaymentService) =>
+{
+    var payment = await rentPaymentService.DeletePaymentAsync(id);
+    if(!payment) return Results.NotFound(ApiResponse<string>.Fail("Rent payment not found."));
     return Results.NoContent();
 });
-app.MapDelete("/rentPayments/{id}", async (int id, AppDbContext db) =>
+
+app.Lifetime.ApplicationStopped.Register(() =>
 {
-    var rentPayment = db.RentPayments.Find(id);
-    if (rentPayment is null) return Results.NotFound();
-    db.RentPayments.Remove(rentPayment);
-    await db.SaveChangesAsync();
-    return Results.NoContent();
+    Log.Information("Application stopped.");
 });
 
 app.Run();
-
